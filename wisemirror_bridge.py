@@ -33,6 +33,8 @@ SOURCE_PORT = int(os.getenv("SOURCE_PORT", "4026"))         # wie die App; 0 = z
 TIMEOUT = float(os.getenv("TIMEOUT", "2.0"))
 INTERVAL = int(os.getenv("INTERVAL", "60"))
 RETRIES = int(os.getenv("RETRIES", "3"))
+# Manche Modelle haben keinen Feuchtesensor und senden einen festen Platzhalterwert.
+PUBLISH_HUMIDITY = os.getenv("PUBLISH_HUMIDITY", "true").strip().lower() in ("1", "true", "yes", "on")
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
@@ -150,7 +152,11 @@ def publish_discovery(client, m):
             "value_template": "{{ value_json.temperature }}",
         },
     }
-    if m["humidity"] is not None:
+    hum_topic = f"{DISCOVERY_PREFIX}/sensor/{did}/humidity/config"
+    if not PUBLISH_HUMIDITY or m["humidity"] is None:
+        # leerer retained Payload entfernt eine evtl. früher angelegte Entität aus HA
+        client.publish(hum_topic, "", retain=True)
+    else:
         sensors["humidity"] = {
             "name": "Luftfeuchtigkeit",
             "device_class": "humidity",
@@ -169,7 +175,20 @@ def run_loop():
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="wisemirror-bridge")
     if MQTT_USER:
         client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
-    client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
+    if not MQTT_HOST:
+        log.error("MQTT_HOST ist nicht gesetzt")
+        sys.exit(2)
+    delay = 5
+    while True:
+        try:
+            client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
+            break
+        except OSError as e:
+            log.error("MQTT-Broker %s:%s nicht erreichbar (%s), neuer Versuch in %ss",
+                      MQTT_HOST, MQTT_PORT, e, delay)
+            time.sleep(delay)
+            delay = min(delay * 2, 300)
+    log.info("Verbunden mit MQTT-Broker %s:%s", MQTT_HOST, MQTT_PORT)
     client.loop_start()
 
     announced = set()
@@ -194,7 +213,7 @@ def run_loop():
             client.publish(f"{BASE_TOPIC}/{did}/availability", "online", retain=True)
             client.publish(f"{BASE_TOPIC}/{did}/state", json.dumps({
                 "temperature": m["temperature"],
-                "humidity": m["humidity"],
+                "humidity": m["humidity"] if PUBLISH_HUMIDITY else None,
                 "ip": m["ip"],
             }), retain=True)
             log.debug("%s: %s%s, %s %%", did, m["temperature"], m["unit"], m["humidity"])
