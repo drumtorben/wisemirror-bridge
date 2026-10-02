@@ -1,0 +1,15 @@
+services:
+  wisemirror-bridge:
+    build: .
+    image: wisemirror-bridge:latest
+    container_name: wisemirror-bridge
+    restart: unless-stopped
+    # host-Netz nötig: UDP-Broadcast und Antwort an Port 4026 kommen sonst nicht durch
+    network_mode: host
+    environment:
+      MIRROR_HOST: ${MIRROR_HOST:-255.255.255.255}
+      MQTT_HOST: ${MQTT_HOST}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USER: ${MQTT_USER:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      INTERVAL: ${INTERVAL:-60}
